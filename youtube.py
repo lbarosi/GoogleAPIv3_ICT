@@ -63,7 +63,7 @@ def open_credentials(SCOPE, CLIENT_SECRETS_FILE):
     flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
       message=MISSING_CLIENT_SECRETS_MESSAGE,
       scope=SCOPE)
-    storage = Storage("./secret/%s-oauth2.json" % sys.argv[0])
+    storage = Storage('./secret/{}-oauth2.json'.format(str(sys.argv[0])))
     credentials = storage.get()
     # You may pick the credentials from the browser
     if credentials is None or credentials.invalid:
@@ -128,28 +128,28 @@ def create_video_list(service, list_name=''):
     print("New playlist id: %s" % playlists_insert_response["id"])
     return [list_name, playlists_insert_response["id"]]
 
-def create_all_playlists(service, lista = []):
-    """Create a list of playlist in the authorized channel. Process each name in 60s interval to avoid 503 ERROR.
-
-    Args:
-        service (type): youtube service `service`.
-        lista (type): list with the playlist names `lista`. Defaults to [].
-
-    Returns:
-        type: None
-
-    """
-
-    sleep_time = 60
-    keys = []
-    for item in lista:
-        sleep_seconds = random.random() * sleep_time
-        print( "Sleeping %f seconds and then retrying..." % sleep_seconds)
-        keys.append(response = create_video_list(service, list_name=item))
-        time.sleep(sleep_seconds)
-    print('Done creating playlists')
-    playlists = pd.DataFrame(keys, columns=['listname','list_id'])
-    return playlists
+# def create_all_playlists(service, lista = []):
+#     """Create a list of playlist in the authorized channel. Process each name in 60s interval to avoid 503 ERROR.
+#
+#     Args:
+#         service (type): youtube service `service`.
+#         lista (type): list with the playlist names `lista`. Defaults to [].
+#
+#     Returns:
+#         type: None
+#
+#     """
+#
+#     sleep_time = 60
+#     keys = []
+#     for item in lista:
+#         sleep_seconds = random.random() * sleep_time
+#         print( "Sleeping %f seconds and then retrying..." % sleep_seconds)
+#         keys.append(response = create_video_list(service, list_name=item))
+#         time.sleep(sleep_seconds)
+#     print('Done creating playlists')
+#     playlists = pd.DataFrame(keys, columns=['listname','list_id'])
+#     return playlists
 
 #--------------------------------------
 def insert_video_playlist(service, playlist, video):
@@ -164,21 +164,19 @@ def insert_video_playlist(service, playlist, video):
         type: Description of returned object.
 
     """
-    playlists_insert_video = service.playlistsitems().insert(
-      part="snippet",
-      body=dict(
-        snippet=dict(
-          playlistId=playlist,
-          resourceId= {
-                    kind='youtube#video',
-                    videoId=video
-                    }
+    playlists_insert_video = service.playlistsitems().insert(part="snippet",
+        body=dict(snippet=dict(
+            playlistId=playlist,
+            resourceId={
+                kind="youtube#video",
+                videoId=video
+                }
+            )
         )
-      )
     ).execute()
+
     return None
 
-    return
 #--------------------------------------
 
 def initialize_upload(service, filename, body):

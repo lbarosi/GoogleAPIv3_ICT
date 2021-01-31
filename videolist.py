@@ -1,10 +1,10 @@
 #!/usr/bin/env python
- """
- # This script read a LOCAL google form with video informations for R&D initiation projets for evaluation in 2021 due to sars-cov-2 pandemics. It generates leveral playlists, download files localli then upload them to youtube channel, creating proper tags.
- Author: Luciano Barosi
- Company: Universidade Federal de Campina Grande
- Created: 31/jan/2020
- """
+"""
+    This script read a LOCAL google form with video informations for R&D initiation projets for evaluation in 2021 due to sars-cov-2 pandemics. It generates leveral playlists, download files localli then upload them to youtube channel, creating proper tags.
+    Author: Luciano Barosi
+    Company: Universidade Federal de Campina Grande
+    Created: 31/jan/2020
+"""
 #--------------------------------------
 #----IMPORTS
 import os
