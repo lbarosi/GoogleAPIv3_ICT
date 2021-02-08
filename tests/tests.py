@@ -37,27 +37,50 @@ df = pd.merge(  left=videos_validos,
                 right=videos,
                 left_on='ID',
                 right_on='video_title',
-                how='left'
+                how='outer'
                 )
+
+df.shape
+
 df = pd.merge(  left=df,
                 right=listas,
                 left_on='UA',
                 right_on='listname',
-                how='left'
+                how='outer'
                 )
-keys = []
-for ID in df['ID'].unique():
+
+df.shape
+df
+df.dropna().shape
+df = df.sort_values(by=['ID'])
+listID = df['ID'].unique()
+n = 0
+for ID in listID:
+    n = n+1
+    print('Updating {0} de {1}'.format(n,len(listID)))
     dados = df[df['ID']==ID]
     params = Namespace(title=dados['title'].iloc[0],
                         description=dados['description'].iloc[0],
                         category=dados['category'].iloc[0],
                         keywords=dados['keywords'].iloc[0]
                         )
-    body = youtube.dict_struc(params)
-    video_id = dados['video_id'].iloc[0]
-    playlist_id = dados['playlist_id'].iloc[0]
-    body['snippet']['playlist_id']=playlist_id
-    body['snippet']['id']=video_id
-    print(body)
+    if params.keywords:
+        tags = params.keywords.split(",")
 
-body['snippet']['id']
+    video_id = dados['video_id'].iloc[0]
+    body = {
+         "id": video_id,
+         'snippet': {
+              'title': params.title,
+              "description": params.description,
+              'tags': tags,
+              'categoryId': params.category
+         },
+         "status": {
+              "privacyStatus": 'public',
+         },
+    }
+    print(body)
+    time.sleep(20)
+    response = youtube.update_video(service, body)
+    print(response['id'])

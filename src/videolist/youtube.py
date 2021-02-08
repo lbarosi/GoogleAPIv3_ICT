@@ -253,29 +253,19 @@ def insert_video_playlist(service, video_list):
     return None
 
 def update_video(service, body):
-    #Call the API's videos.list method to retrieve the video resource.
-    # print('video exists')
-    # response = service.videos().list(
-    #     id=body['snippet']['id'],
-    #     part='snippet'
-    # ).execute()
-    # print(response['snippet'])
-    # # If the response does not contain an array of "items" then the video was
-    # # not found.
-    # if not videos_list_response["items"]:
-    #     print("Video not found.")
-    #     sys.exit(1)
 
-    # Update the video resource by calling the videos.update() method.
-    print('trying')
-    response =service.videos().update(
-    part=",".join(body.keys()),
-    body=body,
-    ).execute()
-    print('done')
+    try:
+        response =service.videos().update(
+        part=",".join(body.keys()),
+        body=body,
+        ).execute()
+    except HttpError as error:
+        print(error)
+        print("failed {}".body['id'])
+        response['id']=body['id']
+        pass
 
-    return response
-
+    return response['id']
 
 def initialize_upload(service, filename, body):
     """Initiate connection to upload and pass to connection manager .
