@@ -92,7 +92,7 @@ def do_list():
     videos_validos['title'] = videos_validos.apply(lambda row:
                          'ICT-2020-' + '-'+ row['TIPO'] + '-'+row['AREA'] + '-' + '-' + row['CENTRO'] +
                          '-' + row['UA'] + ':  ' +
-                         str(row['TITULO'])[0 : min(len(str(row['TITULO'])),30)] + '...',
+                         str(row['TITULO'])[0 : min(len(str(row['TITULO'])),15)],
                          axis = 1
                         )
     videos_validos['description'] = 'Videos para avaliação dos projetos de Iniciação Científica e Tecnológica, vigência 2019 - 2020, da Universidade Federal de Campina Grande. Provisoriamente armazenados nesta canal por problemas técnicos.'
@@ -146,30 +146,33 @@ def youtube_upload_files(df,args):
     files = glob('./VIDEO/*.mp4')
     keys = []
     for file in files:
-        ID = file.split('.')[0]
-        dados = df[df['ID'==ID]]
+        ID = file.split('/')[-1].split('.')[0]
+        dados = df[df['ID']==int(ID)]
         params = Namespace(title=dados['title'].iloc[0],
                             description=dados['description'].iloc[0],
                             category=dados['category'].iloc[0],
-                            keywords=dados['keywords'].iloc[0],
-                            secret = args.secret
+                            keywords=dados['keywords'].iloc[0]
                             )
-        keys.append(youtube.youtube_upload(body, params, file))
+        body = youtube.dict_struc(params)
+        secret = Namespace(secret=args.secret)
+        keys.append(youtube.youtube_upload(body, secret, file))
     video_list = pd.DataFrame(keys, columns=['filename','video_id'])
     return video_list
 
-def populate_playlists(service, videos_validos):
+def youtube_update_files(videos_validos, service):
+    print('Preparing data')
     try:
-        videos = pd.read_csv('./videolist.csv')
+        videos = pd.read_csv('./videos.csv')
         listas = pd.read_csv('./playlists.csv')
     except FileNotFoundError:
         exit("file {} does not exist".format(fname))
-    videos['filename'] = videos['filename'].apply(lambda row: row.split('.')[0])
-    listas['listname'] = lista['filename'].apply(lambda row: row.split('-')[-1])
+    videos = videos[videos['video_title'].str.match('[0-9]{4}')]
+    listas['listname'] = listas['playlist_title'].apply(lambda row: row.split('-')[-1])
+    videos_validos['ID'] = videos_validos['ID'].astype(str)
     df = pd.merge(  left=videos_validos,
                     right=videos,
                     left_on='ID',
-                    right_on='filename',
+                    right_on='video_title',
                     how='left'
                     )
     df = pd.merge(  left=df,
@@ -178,15 +181,56 @@ def populate_playlists(service, videos_validos):
                     right_on='listname',
                     how='left'
                     )
-    df = df[['video_id', 'list_id']]
-
-    sleep_time = 60
+    df = df.dropna()
     keys = []
-    for lista in df['list_id']:
-            for file in df[df['list_id']==lista]['video_id']:
-                sleep_seconds = random.random() * sleep_time
-                youtube.create_video_list(service, lista, file)
-                time.sleep(sleep_seconds)
+    for ID in df['ID'].unique():
+    print('test run')
+        dados = df[df['ID']==ID]
+        params = Namespace(title=dados['title'].iloc[0],
+                            description=dados['description'].iloc[0],
+                            category=dados['category'].iloc[0],
+                            keywords=dados['keywords'].iloc[0]
+                            )
+        body = youtube.dict_struc(params)
+        video_id = dados['video_id'].iloc[0]
+        playlist_id = dados['playlist_id'].iloc[0]
+        body['snippet']['playlist_id']=playlist_id
+        body['snippet']['id']=video_id
+        print(body)
+        response = youtube.update_video(service, body)
+        print(response['id'])
+    #video_list = pd.DataFrame(keys, columns=['filename','video_id'])
+
+
+    return None
+
+
+def populate_playlists(service, videos_validos):
+    try:
+        videos = pd.read_csv('./videos.csv')
+        listas = pd.read_csv('./playlists.csv')
+    except FileNotFoundError:
+        exit("file {} does not exist".format(fname))
+    videos = videos[videos['video_title'].str.match('[0-9]{4}')]
+    listas['listname'] = listas['playlist_title'].apply(lambda row: row.split('-')[-1])
+    videos_validos['ID'] = videos_validos['ID'].astype(str)
+    df = pd.merge(  left=videos_validos,
+                    right=videos,
+                    left_on='ID',
+                    right_on='video_title',
+                    how='left'
+                    )
+    df = pd.merge(  left=df,
+                    right=listas,
+                    left_on='UA',
+                    right_on='listname',
+                    how='left'
+                    )
+    df = df[['video_id', 'playlist_id']]
+    df = df.dropna()
+    video_list = df.to_dict()
+
+    youtube.insert_video_playlist(service, video_list)
     print('Done populating playlists')
     return
 #--------------------------------------
@@ -195,7 +239,7 @@ def parse_args(args):
     parser = argparse.ArgumentParser(description='Create Video Collection')
     #----arguments
     parser.add_argument('--secret', required=True, help='Json credentials for API')
-    parser.add_argument('--operations',  required=True, help='Set of Operations to perform: all|download|upload|create_playlists|populate_playlists')
+    parser.add_argument('--operations',  required=True, help='Set of Operations to perform: all|download|upload|create_playlists|populate_playlists|list_playlists|list_videos|update')
     parser.add_argument('--type', help ='UA|CENTRO|AREA', default='UA')
     parser.add_argument('--criteria', help='A particular subset', default='')
     parser.add_argument('-t', '--test', action='store_true', help="Test run")
@@ -210,17 +254,40 @@ def main(args):
     videos_selected = do_subset(videos_validos, tipo = args.type)
     playlist_names = videos_validos.apply(lambda row:'UFCG-' + row['CENTRO']+'-'+row['UA'], axis = 1).unique().tolist()
 
-    print('videolist initialization\n')
+
+    if args.operations in ['list_playlists','all']:
+        print('Getting current playlists\n')
+        print('Playlists')
+        service = youtube.youtube_service(secret)
+        playlists = youtube.get_playlists(service)
+        df = pd.DataFrame(playlists, columns=['playlist_title','playlist_id'])
+        df.to_csv('./playlists.csv', mode = 'a', sep=',', index=False)
+
+    if args.operations in ['list_videos','all']:
+        print('Getting current Videos\n')
+        #service = youtube.youtube_service(secret)
+        #playlists = youtube.get_playlists(service)
+        service = youtube.youtube_service(secret)
+        videolists = youtube.get_videolist(service)
+        df = pd.DataFrame(videolists, columns=['video_title','video_id'])
+        df.to_csv('./videos.csv', mode = 'a', sep=',', index=False)
 
     if args.operations in ['create_playlists','all']:
         print('Creating Playlists')
         service = youtube.youtube_service(secret)
-        playlists = youtube.create_all_playlists(service, lista=playlist_names)
-        playlists.to_csv('./playlists.csv', sep=',', index=False)
+        try:
+            current_lists = pd.read_csv('./playlists.csv')
+        except FileNotFoundError:
+            fetch_lists = youtube.get_playlists(service)
+            current_lists = pd.DataFrame(fetch_lists, columns=['playlist_title','playlist_id'])
+        playlists = list(set(playlist_names)-set(current_lists['playlist_title'].unique()))
+        created_playlists = youtube.create_all_playlists(service, lista=playlist_names)
+        df = pd.DataFrame(created_playlists, columns=['playlist_title','playlist_id'])
+        if not df[df['playlist_id']!='ERROR'].empty:
+            df.to_csv('./playlists.csv', mode = 'a', sep=',', index=False)
 
     if args.operations in ['download','all']:
         print('Operation: Downloading Files')
-
         service = drive.gdrive_service(secret)
         df = videos_selected[videos_selected['TIPO']==args.type]
         if args.criteria:
@@ -236,12 +303,21 @@ def main(args):
     if args.operations in ['upload','all']:
         print('Uploading Files')
         videos = youtube_upload_files(videos_validos, args)
-        videos.to_csv('./videolist.csv', sep=',', index=False)
+        videos.to_csv('./videolist.csv', mode = a, sep=',', index=False)
 
     if args.operations in ['populate_playlists','all']:
         service = youtube.youtube_service(secret)
         print('Populating playlists')
         populate_playlists(service, videos_validos)
+
+    if args.operations in ['update','all']:
+        print('Updating Video')
+        print('Start service')
+        service = youtube.youtube_service(secret)
+        print('Start updating')
+        youtube_update_files(videos_validos, service)
+        print('updating done')
+
     return None
 #--------------------------------------
 if __name__ == '__main__':

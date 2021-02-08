@@ -63,7 +63,7 @@ def open_credentials(SCOPE, CLIENT_SECRETS_FILE):
     flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
       message=MISSING_CLIENT_SECRETS_MESSAGE,
       scope=SCOPE)
-    storage = Storage('./secret/{}-oauth2.json'.format(str(sys.argv[0])))
+    storage = Storage("./secret/{}-oauth2.json".format(sys.argv[0]))
     credentials = storage.get()
     # You may pick the credentials from the browser
     if credentials is None or credentials.invalid:
@@ -84,7 +84,11 @@ def youtube_service(args):
     """
 
     CLIENT_SECRETS_FILE = args.secret
-    SCOPE = 'https://www.googleapis.com/auth/youtube'
+    SCOPE = [
+        'https://www.googleapis.com/auth/youtube',
+        'https://www.googleapis.com/auth/youtube.upload',
+        'https://www.googleapis.com/auth/youtube.readonly',
+    ]
     try:
         CLIENT_SECRETS_FILE = args.secret
     except KeyError as e:
@@ -102,6 +106,62 @@ def youtube_service(args):
 
     return youtube
 
+def get_videolist(service):
+    # Retrieve the contentDetails part of the channel resource for the
+    # authenticated user's channel.
+    channels_response = service.channels().list(
+        mine=True,
+        part="contentDetails"
+    ).execute()
+
+    for channel in channels_response["items"]:
+    # From the API response, extract the playlist ID that identifies the list of videos uploaded to the authenticated user's channel.
+        uploads_list_id = channel["contentDetails"]["relatedPlaylists"]["uploads"]
+
+    print("Videos in list {}".format(uploads_list_id))
+
+    # Retrieve the list of videos uploaded to the authenticated user's channel.
+    request = service.playlistItems().list(
+        playlistId=uploads_list_id,
+        part="snippet",
+        maxResults=50
+    )
+    videos=[]
+    while request is not None:
+        response = request.execute()
+        videos += response['items']
+        #print(response['items']['snippet']['title'])
+        request = service.playlistItems().list_next(
+            request, response)
+
+    videodata = [
+        [item['snippet']['title'],
+         item["snippet"]["resourceId"]["videoId"]
+         ] for item in videos
+    ]
+    return videodata
+
+def get_playlists(service):
+
+    channel = service.channels().list(part="id", mine=True).execute()
+    #channel_id = channel['id']
+    channel_id = (channel['items'][0]['id'])
+    request = service.playlists().list(
+    part = "snippet",
+    channelId = channel_id,
+    maxResults = 50
+    )
+    response = request.execute()
+    playlists = []
+    lista = []
+    while request is not None:
+        response = request.execute()
+        playlists += response["items"]
+        request = service.playlists().list_next(request, response)
+
+    playlist_pair = [ [item['snippet']['title'], item['id']] for item in playlists]
+    return playlist_pair
+
 def create_video_list(service, list_name=''):
     """Create a playlist in the authorized channel.
 
@@ -113,46 +173,55 @@ def create_video_list(service, list_name=''):
         type: playlist ID.
 
     """
-    playlists_insert_response = service.playlists().insert(
-      part="snippet,status",
-      body=dict(
-        snippet=dict(
-          title=list_name,
-          description="Videos do Centro e Unidade Acadêmica referenciados"
-        ),
-        status=dict(
-          privacyStatus="public"
-        )
-      )
-    ).execute()
+    # Handle 429 exception HttpError
+    try:
+        playlists_insert_response = service.playlists().insert(
+          part="snippet,status",
+          body=dict(
+            snippet=dict(
+              title=list_name,
+              description="Videos do Centro e Unidade Acadêmica referenciados"
+            ),
+            status=dict(
+              privacyStatus="public"
+            )
+          )
+        ).execute()
+    except HttpError as error:
+        print(error)
+        return [[list_name,'ERROR']]
     print("New playlist id: %s" % playlists_insert_response["id"])
-    return [list_name, playlists_insert_response["id"]]
+    return [[list_name, playlists_insert_response["id"]]]
 
-# def create_all_playlists(service, lista = []):
-#     """Create a list of playlist in the authorized channel. Process each name in 60s interval to avoid 503 ERROR.
-#
-#     Args:
-#         service (type): youtube service `service`.
-#         lista (type): list with the playlist names `lista`. Defaults to [].
-#
-#     Returns:
-#         type: None
-#
-#     """
-#
-#     sleep_time = 60
-#     keys = []
-#     for item in lista:
-#         sleep_seconds = random.random() * sleep_time
-#         print( "Sleeping %f seconds and then retrying..." % sleep_seconds)
-#         keys.append(response = create_video_list(service, list_name=item))
-#         time.sleep(sleep_seconds)
-#     print('Done creating playlists')
-#     playlists = pd.DataFrame(keys, columns=['listname','list_id'])
-#     return playlists
+def create_all_playlists(service, lista = []):
+    """Create a list of playlist in the authorized channel. Process each name in 60s interval to avoid 503 ERROR.
 
-#--------------------------------------
-def insert_video_playlist(service, playlist, video):
+    Args:
+        service (type): youtube service `service`.
+        lista (type): list with the playlist names `lista`. Defaults to [].
+
+    Returns:
+        type: None
+
+    """
+    sleep_time = 60
+    keys = []
+    for item in lista:
+        sleep_time = 60
+        sleep_seconds = random.random() * sleep_time
+        print( "Sleeping %f seconds and then retrying..." % sleep_seconds)
+        try:
+            newlist = create_video_list(service, list_name=item)
+            if newlist[0][1]=='ERROR':
+                raise ValueError('error in create_video_list')
+        except ValueError as error:
+            print(error)
+            return newlist
+        keys.append(newlist)
+        time.sleep(sleep_seconds)
+    return playlists
+
+def insert_video_playlist(service, video_list):
     """Insert video in playlist of authorized channel. playlistID and videoID are needed
 
     Args:
@@ -164,20 +233,49 @@ def insert_video_playlist(service, playlist, video):
         type: Description of returned object.
 
     """
-    playlists_insert_video = service.playlistsitems().insert(part="snippet",
-        body=dict(snippet=dict(
-            playlistId=playlist,
-            resourceId={
-                kind="youtube#video",
-                videoId=video
+    batch = service.new_batch_http_request()
+    for playlist_id, video_id in video_list.items():
+        batch.add(service.playlistItems().insert(
+            part="snippet",
+            body={
+              "snippet": {
+                "playlistId": playlist_id, #an actual playlistid
+                "position": 0,
+                "resourceId": {
+                  "kind": "youtube#video",
+                  "videoId": video_id
                 }
-            )
+              }
+            }
+          )
         )
-    ).execute()
-
+    responses = batch.execute()
     return None
 
-#--------------------------------------
+def update_video(service, body):
+    #Call the API's videos.list method to retrieve the video resource.
+    # print('video exists')
+    # response = service.videos().list(
+    #     id=body['snippet']['id'],
+    #     part='snippet'
+    # ).execute()
+    # print(response['snippet'])
+    # # If the response does not contain an array of "items" then the video was
+    # # not found.
+    # if not videos_list_response["items"]:
+    #     print("Video not found.")
+    #     sys.exit(1)
+
+    # Update the video resource by calling the videos.update() method.
+    print('trying')
+    response =service.videos().update(
+    part=",".join(body.keys()),
+    body=body,
+    ).execute()
+    print('done')
+
+    return response
+
 
 def initialize_upload(service, filename, body):
     """Initiate connection to upload and pass to connection manager .

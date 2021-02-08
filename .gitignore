@@ -61,3 +61,4 @@ dmypy.json
 DATA/
 secret/
 VIDEO/
+VIDEOS_UPLOADED/
